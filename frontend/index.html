@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BackdoorScan - 服务器后门扫描</title>
+    <style>
+        :root {
+            --bg-primary: #0f1419;
+            --bg-secondary: #1a1f26;
+            --bg-tertiary: #242b35;
+            --text-primary: #e6e9eb;
+            --text-secondary: #8b949e;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #30363d;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            border-radius: 12px 12px 0 0;
+        }
+
+        .header h1 { font-size: 20px; display: flex; align-items: center; gap: 12px; }
+        .header h1 span { font-size: 28px; }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+
+        .connection-status .indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+
+        .connection-status.connected .indicator { background: var(--success); }
+        .connection-status.connecting .indicator { background: var(--warning); animation: pulse 1s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--border); }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-success { background: var(--success); color: white; }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-top: 0;
+            background: var(--bg-secondary);
+            padding: 16px 24px;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .stat-card .value { font-size: 28px; font-weight: 700; }
+        .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+        .stat-card.total .value { color: var(--accent); }
+        .stat-card.clean .value { color: var(--success); }
+        .stat-card.warning .value { color: var(--warning); }
+        .stat-card.danger .value { color: var(--danger); }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 24px;
+            margin-top: 0;
+            background: var(--bg-secondary);
+            padding: 24px;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .left-panel, .right-panel { display: flex; flex-direction: column; gap: 16px; }
+
+        .panel {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-body { padding: 16px; }
+
+        .server-input {
+            width: 100%;
+            height: 120px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--text-primary);
+            font-family: monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+
+        .server-input:focus { outline: none; border-color: var(--accent); }
+
+        .input-hint { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+
+        .input-options { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+        .input-options label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+        .input-options input[type="number"] {
+            width: 80px;
+            padding: 6px 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+        }
+
+        .btn-group { display: flex; gap: 8px; margin-top: 12px; }
+
+        .server-list { max-height: 450px; overflow-y: auto; }
+
+        .server-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+
+        .server-item:hover { background: var(--border); }
+
+        .server-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .server-item .ip { flex: 1; font-family: monospace; font-size: 13px; }
+        .server-item .user { color: var(--text-secondary); font-size: 12px; }
+
+        .server-item .status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-pending { background: var(--text-secondary); }
+        .status-connected { background: var(--success); }
+        .status-testing { background: var(--warning); animation: pulse 1s infinite; }
+        .status-failed { background: var(--danger); }
+        .status-completed { background: var(--success); }
+
+        .server-item .actions { display: flex; gap: 4px; }
+        .server-item .actions button {
+            padding: 4px 8px;
+            font-size: 12px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        .server-item .actions button:hover { opacity: 1; }
+
+        .progress-section {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .control-btns { display: flex; gap: 8px; margin-top: 12px; }
+
+        /* 检测项目 — 紧凑样式 */
+        .detection-panel .panel-header { font-size: 13px; }
+        .detection-panel .panel-body { padding: 12px; }
+        .detection-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        .detection-item input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+        .detection-item .icon { font-size: 14px; }
+        .detection-item .info { flex: 1; }
+        .detection-item .name { font-weight: 600; font-size: 12px; }
+        .detection-item .desc { font-size: 11px; color: var(--text-secondary); }
+
+        .result-section {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .result-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .result-header-left input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+        .result-server { font-weight: 600; font-size: 14px; }
+        .result-status { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
+        .result-status.clean { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .result-status.warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .result-status.danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+
+        .result-toggle {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 4px 8px;
+        }
+        .result-toggle:hover { color: var(--text-primary); }
+
+        .result-details { display: none; margin-top: 10px; }
+        .result-details.expanded { display: block; }
+
+        .result-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 6px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+
+        .result-item.pass { border-left: 3px solid var(--success); }
+        .result-item.warning { border-left: 3px solid var(--warning); }
+        .result-item.danger { border-left: 3px solid var(--danger); }
+
+        .export-section {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+        }
+
+        .export-section select {
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+        }
+
+        .checkbox-toolbar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .checkbox-toolbar a {
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .checkbox-toolbar a:hover { text-decoration: underline; }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span>🛡️</span> BackdoorScan - 服务器后门扫描</h1>
+            <div class="header-controls">
+                <input type="text" id="apiBaseUrl" value="http://127.0.0.1:8765" style="width:180px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="indicator"></span>
+                    <span class="text">未连接</span>
+                </div>
+                <button class="btn btn-secondary" id="connectBtn" onclick="connectBackend()">🔗 连接后端</button>
+            </div>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat-card total">
+                <div class="value" id="totalServers">0</div>
+                <div class="label">服务器总数</div>
+            </div>
+            <div class="stat-card clean">
+                <div class="value" id="cleanServers">0</div>
+                <div class="label">安全</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="value" id="warningServers">0</div>
+                <div class="label">可疑</div>
+            </div>
+            <div class="stat-card danger">
+                <div class="value" id="dangerServers">0</div>
+                <div class="label">危险</div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <!-- 左侧：解析服务器 + 检测项目 -->
+            <div class="left-panel">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>📥 解析服务器</span>
+                    </div>
+                    <div class="panel-body">
+                        <textarea class="server-input" id="serverInput" placeholder="输入服务器信息，格式：
+IP,用户名,密码
+或
+IP:端口,用户名,密码
+
+示例：
+192.168.1.10,root,password123
+192.168.1.11:2222,admin,secret456
+10.0.0.1,root,my_password"></textarea>
+                        <div class="input-hint">支持批量导入，每行一个服务器</div>
+                        <div class="input-options">
+                            <label>默认端口: <input type="number" id="defaultPort" value="22" min="1" max="65535"></label>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="parseServers()">📥 解析服务器</button>
+                            <button class="btn btn-secondary" onclick="testAllConnections()">🔗 测试连接</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel detection-panel">
+                    <div class="panel-header">
+                        <span>📋 检测项目</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="checkbox-toolbar">
+                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" id="selectAllItems" onchange="toggleAllItems(this.checked)"> 全选
+                            </label>
+                            <a onclick="reverseItems()">反选</a>
+                        </div>
+                        <div id="detectionItems"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：服务器列表 + 检测控制 + 检测结果 -->
+            <div class="right-panel">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>🖥️ 服务器列表</span>
+                        <span id="serverCount">0</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="checkbox-toolbar">
+                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" id="selectAllServers" onchange="toggleAllServers(this.checked)"> 全选
+                            </label>
+                            <a onclick="reverseServers()">反选</a>
+                        </div>
+                        <div class="server-list" id="serverList">
+                            <div class="empty-state">暂无服务器，请先解析</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>⚡ 检测控制</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="progress-section">
+                            <div class="progress-info">
+                                <span id="progressText">等待开始检测...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="fill" id="progressFill" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-info">
+                                <span id="currentServer">-</span>
+                                <span id="currentItem">-</span>
+                            </div>
+                        </div>
+                        <div class="control-btns" id="controlBtns">
+                            <button class="btn btn-success" id="startBtn" onclick="startDetection()">▶️ 开始检测</button>
+                            <button class="btn btn-secondary" id="pauseBtn" onclick="pauseDetection()" style="display:none">⏸️ 暂停</button>
+                            <button class="btn btn-secondary" id="resumeBtn" onclick="resumeDetection()" style="display:none">▶️ 继续</button>
+                            <button class="btn btn-danger" id="stopBtn" onclick="stopDetection()" style="display:none">⏹️ 停止</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>📊 检测结果</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="checkbox-toolbar">
+                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" id="selectAllResults" onchange="toggleAllResults(this.checked)"> 全选
+                            </label>
+                            <a onclick="reverseResults()">反选</a>
+                            <span style="margin-left:auto;display:flex;gap:8px;">
+                                <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px;" onclick="deleteSelectedResults()">🗑️ 删除</button>
+                                <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px;" onclick="rerunSelectedResults()">🔄 重新检测</button>
+                            </span>
+                        </div>
+                        <div id="resultsList">
+                            <div class="empty-state">暂无检测结果</div>
+                        </div>
+                        <div class="export-section" style="margin-top:12px;flex-direction:row;align-items:center;">
+                            <select id="exportFormat" style="flex:1;">
+                                <option value="html">HTML 报告</option>
+                                <option value="json">JSON 报告</option>
+                                <option value="txt">TXT 报告</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="exportReport()">📥 导出</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getApiBase() {
+            return document.getElementById('apiBaseUrl').value + '/api';
+        }
+
+        let isConnected = false;
+
+        const state = {
+            servers: [],
+            results: new Map(),
+            progress: { total: 0, completed: 0, currentServer: '', currentItem: '', isPaused: false, isRunning: false, percentage: 0 },
+            selectedFormat: 'html',
+            selectedServerIds: new Set(),
+            selectedItemNames: new Set(),
+            selectedResultIds: new Set()
+        };
+
+        const detectionCommands = [
+            { name: 'suspicious_port', description: '异常端口检测', category: 'network', icon: '🔌' },
+            { name: 'suspicious_process', description: '可疑进程检测', category: 'process', icon: '⚙️' },
+            { name: 'cron_job', description: '定时任务后门检测', category: 'persistence', icon: '⏰' },
+            { name: 'ssh_key', description: 'SSH密钥后门检测', category: 'persistence', icon: '🔑' },
+            { name: 'hidden_process', description: '隐藏进程检测', category: 'process', icon: '👻' },
+            { name: 'suid_file', description: 'SUID后门文件检测', category: 'persistence', icon: '📁' },
+            { name: 'temp_file', description: '临时目录可疑文件', category: 'persistence', icon: '📂' },
+            { name: 'network_connection', description: '异常网络连接', category: 'network', icon: '🌐' },
+            { name: 'bash_history', description: '历史命令异常', category: 'investigation', icon: '📜' },
+            { name: 'rootkit', description: 'Rootkit特征', category: 'malware', icon: '🦠' },
+            { name: 'network_interface', description: '异常网络接口', category: 'network', icon: '📡' },
+            { name: 'malware_file', description: '恶意文件特征', category: 'malware', icon: '☠️' }
+        ];
+
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            try {
+                const options = { method, headers: { 'Content-Type': 'application/json' } };
+                if (body) options.body = JSON.stringify(body);
+                const response = await fetch(`${getApiBase()}${endpoint}`, options);
+                return await response.json();
+            } catch (error) {
+                console.error('API调用失败:', error);
+                return { success: false, error: error.message };
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('connectionStatus');
+            const btnEl = document.getElementById('connectBtn');
+            isConnected = connected;
+            if (connected) {
+                statusEl.className = 'connection-status connected';
+                statusEl.querySelector('.text').textContent = '已连接';
+                btnEl.textContent = '🔄 重新连接';
+            } else {
+                statusEl.className = 'connection-status';
+                statusEl.querySelector('.text').textContent = '未连接';
+                btnEl.textContent = '🔗 连接后端';
+            }
+        }
+
+        async function connectBackend() {
+            updateConnectionStatus(false);
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = 'connection-status connecting';
+            statusEl.querySelector('.text').textContent = '连接中...';
+
+            try {
+                const response = await apiCall('/get_servers', 'POST', {});
+                if (response.success !== undefined) {
+                    updateConnectionStatus(true);
+                    loadDetectionCommands();
+                    // 加载数据库中已有的服务器列表
+                    if (response.data && response.data.servers) {
+                        state.servers = response.data.servers;
+                        state.selectedServerIds.clear();
+                        state.servers.forEach(s => state.selectedServerIds.add(s.id));
+                        renderServerList();
+                        updateStats();
+                    }
+                    // 加载数据库中已有的检测结果
+                    await fetchResults();
+                } else {
+                    updateConnectionStatus(false);
+                }
+            } catch (e) {
+                updateConnectionStatus(false);
+            }
+        }
+
+        function loadDetectionCommands() {
+            const container = document.getElementById('detectionItems');
+            container.innerHTML = detectionCommands.map(cmd => `
+                <div class="detection-item">
+                    <input type="checkbox" checked data-item="${cmd.name}" onchange="onItemCheckChange()">
+                    <div class="icon">${cmd.icon}</div>
+                    <div class="info">
+                        <div class="name">${cmd.name}</div>
+                        <div class="desc">${cmd.description}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            // 默认全选
+            detectionCommands.forEach(cmd => state.selectedItemNames.add(cmd.name));
+        }
+
+        function toggleAllItems(checked) {
+            document.querySelectorAll('#detectionItems input[type="checkbox"]').forEach(cb => {
+                cb.checked = checked;
+            });
+            if (checked) {
+                detectionCommands.forEach(cmd => state.selectedItemNames.add(cmd.name));
+            } else {
+                state.selectedItemNames.clear();
+            }
+        }
+
+        function reverseItems() {
+            document.querySelectorAll('#detectionItems input[type="checkbox"]').forEach(cb => {
+                cb.checked = !cb.checked;
+                const name = cb.dataset.item;
+                if (cb.checked) state.selectedItemNames.add(name);
+                else state.selectedItemNames.delete(name);
+            });
+        }
+
+        function onItemCheckChange() {
+            state.selectedItemNames.clear();
+            document.querySelectorAll('#detectionItems input[type="checkbox"]:checked').forEach(cb => {
+                state.selectedItemNames.add(cb.dataset.item);
+            });
+        }
+
+        async function parseServers() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            const input = document.getElementById('serverInput').value.trim();
+            if (!input) { alert('请输入服务器信息'); return; }
+
+            const defaultPort = parseInt(document.getElementById('defaultPort').value) || 22;
+            const response = await apiCall('/parse_servers', 'POST', { text: input, default_port: defaultPort });
+
+            if (response.success && response.data) {
+                state.servers = response.data.servers;
+                state.selectedServerIds.clear();
+                state.servers.forEach(s => state.selectedServerIds.add(s.id));
+                renderServerList();
+                updateStats();
+            } else {
+                alert('解析失败: ' + (response.error || '未知错误'));
+            }
+        }
+
+        function renderServerList() {
+            const container = document.getElementById('serverList');
+            const countEl = document.getElementById('serverCount');
+
+            countEl.textContent = state.servers.length;
+
+            if (state.servers.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无服务器，请先解析</div>';
+                return;
+            }
+
+            container.innerHTML = state.servers.map(server => `
+                <div class="server-item" data-id="${server.id}">
+                    <input type="checkbox" ${state.selectedServerIds.has(server.id) ? 'checked' : ''} onchange="onServerCheckChange('${server.id}', this.checked)">
+                    <span class="status status-${server.status || 'pending'}"></span>
+                    <div class="info" style="flex:1">
+                        <div class="ip">${server.ip}:${server.port}</div>
+                        <div class="user">${server.username}</div>
+                    </div>
+                    <div class="actions">
+                        <button onclick="testServerConnection('${server.id}')" title="测试连接">🔗</button>
+                        <button onclick="deleteServer('${server.id}')" title="删除">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleAllServers(checked) {
+            state.selectedServerIds.clear();
+            if (checked) {
+                state.servers.forEach(s => state.selectedServerIds.add(s.id));
+            }
+            document.querySelectorAll('#serverList input[type="checkbox"]').forEach(cb => cb.checked = checked);
+            document.getElementById('selectAllServers').checked = checked;
+        }
+
+        function reverseServers() {
+            state.servers.forEach(s => {
+                if (state.selectedServerIds.has(s.id)) state.selectedServerIds.delete(s.id);
+                else state.selectedServerIds.add(s.id);
+            });
+            renderServerList();
+        }
+
+        function onServerCheckChange(id, checked) {
+            if (checked) state.selectedServerIds.add(id);
+            else state.selectedServerIds.delete(id);
+            updateSelectAllServers();
+        }
+
+        function updateSelectAllServers() {
+            const allChecked = state.servers.length > 0 && state.selectedServerIds.size === state.servers.length;
+            document.getElementById('selectAllServers').checked = allChecked;
+        }
+
+        async function testServerConnection(serverId) {
+            if (!isConnected) return;
+            const server = state.servers.find(s => s.id === serverId);
+            if (server) {
+                server.status = 'testing';
+                renderServerList();
+                const response = await apiCall('/test_connection', 'POST', { server_id: serverId });
+                if (response.success && response.data?.connected) {
+                    server.status = 'connected';
+                } else {
+                    server.status = 'failed';
+                }
+                renderServerList();
+            }
+        }
+
+        async function deleteServer(serverId) {
+            if (!isConnected) return;
+            if (!confirm('确定要删除该服务器及其检测结果吗？')) return;
+            // 删除服务器
+            const resp = await apiCall('/delete_servers', 'POST', { server_ids: [serverId] });
+            if (!resp.success) {
+                alert('删除失败: ' + (resp.error || '未知错误'));
+                return;
+            }
+            // 同时删除检测结果
+            await apiCall('/delete_results', 'POST', { server_ids: [serverId] });
+            state.servers = state.servers.filter(s => s.id !== serverId);
+            state.selectedServerIds.delete(serverId);
+            state.results.delete(serverId);
+            state.selectedResultIds.delete(serverId);
+            renderServerList();
+            renderResults();
+            updateStats();
+        }
+
+        async function testAllConnections() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            if (state.servers.length === 0) { alert('没有服务器'); return; }
+
+            const response = await apiCall('/test_all_connections', 'POST', { server_ids: state.servers.map(s => s.id) });
+
+            if (response.success && response.data) {
+                response.data.results.forEach(result => {
+                    const server = state.servers.find(s => s.id === result.server_id);
+                    if (server) {
+                        server.status = result.connected ? 'connected' : 'failed';
+                    }
+                });
+                renderServerList();
+                updateStats();
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('totalServers').textContent = state.servers.length;
+
+            let cleanCount = 0, warningCount = 0, dangerCount = 0;
+            state.results.forEach(r => {
+                const items = r.items || [];
+                const dangerItems = items.filter(i => i.status === 'danger');
+                const warningItems = items.filter(i => i.status === 'warning');
+                if (dangerItems.length > 0) dangerCount++;
+                else if (warningItems.length > 0) warningCount++;
+                else cleanCount++;
+            });
+            document.getElementById('cleanServers').textContent = cleanCount;
+            document.getElementById('warningServers').textContent = warningCount;
+            document.getElementById('dangerServers').textContent = dangerCount;
+        }
+
+        async function startDetection() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            if (state.selectedServerIds.size === 0) { alert('请选择要检测的服务器'); return; }
+
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = '';
+            document.getElementById('stopBtn').style.display = '';
+
+            const serverIds = Array.from(state.selectedServerIds);
+            const response = await apiCall('/start_detection', 'POST', { server_ids: serverIds });
+            if (response.success) {
+                pollProgress();
+            }
+        }
+
+        async function pauseDetection() {
+            if (!isConnected) return;
+            await apiCall('/pause_detection', 'POST', {});
+            document.getElementById('pauseBtn').style.display = 'none';
+            document.getElementById('resumeBtn').style.display = '';
+        }
+
+        async function resumeDetection() {
+            if (!isConnected) return;
+            await apiCall('/resume_detection', 'POST', {});
+            document.getElementById('resumeBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = '';
+        }
+
+        async function stopDetection() {
+            if (!isConnected) return;
+            if (detectionPollTimer) { clearInterval(detectionPollTimer); detectionPollTimer = null; }
+            await apiCall('/stop_detection', 'POST', {});
+            resetControlBtns();
+        }
+
+        function resetControlBtns() {
+            document.getElementById('startBtn').style.display = '';
+            document.getElementById('pauseBtn').style.display = 'none';
+            document.getElementById('resumeBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'none';
+        }
+
+        async function pollProgress() {
+            if (!isConnected) return;
+
+            const response = await apiCall('/get_progress', 'POST');
+            if (response.success && response.data) {
+                const p = response.data;
+                const percent = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
+
+                document.getElementById('progressFill').style.width = percent + '%';
+                document.getElementById('progressPercent').textContent = percent + '%';
+                document.getElementById('progressText').textContent = `${p.completed}/${p.total}`;
+                document.getElementById('currentServer').textContent = p.current_server || '-';
+                document.getElementById('currentItem').textContent = p.current_item || '-';
+
+                if (p.is_running) {
+                    setTimeout(pollProgress, 1000);
+                } else {
+                    resetControlBtns();
+                    fetchResults();
+                }
+            }
+        }
+
+        async function fetchResults() {
+            if (!isConnected) return;
+            const response = await apiCall('/get_results', 'POST', {});
+            if (response.success && response.data) {
+                state.results.clear();
+                state.selectedResultIds.clear();
+                response.data.results.forEach(r => {
+                    state.results.set(r.server_id, r);
+                    state.selectedResultIds.add(r.server_id);
+                });
+                renderResults();
+            }
+        }
+
+        function toggleResultDetails(serverId) {
+            const el = document.getElementById('result-details-' + serverId);
+            const btn = document.getElementById('result-toggle-' + serverId);
+            if (el.classList.contains('expanded')) {
+                el.classList.remove('expanded');
+                btn.textContent = '▼ 展开';
+            } else {
+                el.classList.add('expanded');
+                btn.textContent = '▲ 收起';
+            }
+        }
+
+        function renderResults() {
+            const container = document.getElementById('resultsList');
+            const resultsArr = Array.from(state.results.values());
+
+            if (resultsArr.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无检测结果</div>';
+                return;
+            }
+
+            let cleanCount = 0, warningCount = 0, dangerCount = 0;
+
+            container.innerHTML = resultsArr.map(result => {
+                const items = result.items || [];
+                const dangerItems = items.filter(i => i.status === 'danger');
+                const warningItems = items.filter(i => i.status === 'warning');
+
+                if (dangerItems.length > 0) dangerCount++;
+                else if (warningItems.length > 0) warningCount++;
+                else cleanCount++;
+
+                const overallStatus = dangerItems.length > 0 ? 'danger' : (warningItems.length > 0 ? 'warning' : 'clean');
+                const statusText = overallStatus === 'clean' ? '安全' : (overallStatus === 'warning' ? '可疑' : '危险');
+                const serverId = result.server_id;
+
+                return `
+                <div class="result-section">
+                    <div class="result-header">
+                        <div class="result-header-left">
+                            <input type="checkbox" ${state.selectedResultIds.has(serverId) ? 'checked' : ''} onchange="onResultCheckChange('${serverId}', this.checked)">
+                            <span class="result-server">${result.server_ip || serverId}</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span class="result-status ${overallStatus}">${statusText}</span>
+                            <button class="result-toggle" id="result-toggle-${serverId}" onclick="toggleResultDetails('${serverId}')">▼ 展开</button>
+                        </div>
+                    </div>
+                    <div class="result-details" id="result-details-${serverId}">
+                        ${items.map(item => `
+                            <div class="result-item ${item.status}">
+                                <span>${item.status === 'pass' ? '✅' : (item.status === 'warning' ? '⚠️' : '❌')}</span>
+                                <span>${item.name}: ${item.details || item.findings?.join(', ') || '-'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            document.getElementById('cleanServers').textContent = cleanCount;
+            document.getElementById('warningServers').textContent = warningCount;
+            document.getElementById('dangerServers').textContent = dangerCount;
+
+            updateSelectAllResults();
+        }
+
+        function toggleAllResults(checked) {
+            state.selectedResultIds.clear();
+            if (checked) {
+                state.results.forEach((_, id) => state.selectedResultIds.add(id));
+            }
+            document.querySelectorAll('#resultsList input[type="checkbox"]').forEach(cb => cb.checked = checked);
+            document.getElementById('selectAllResults').checked = checked;
+        }
+
+        function reverseResults() {
+            state.results.forEach((_, id) => {
+                if (state.selectedResultIds.has(id)) state.selectedResultIds.delete(id);
+                else state.selectedResultIds.add(id);
+            });
+            renderResults();
+        }
+
+        function onResultCheckChange(id, checked) {
+            if (checked) state.selectedResultIds.add(id);
+            else state.selectedResultIds.delete(id);
+            updateSelectAllResults();
+        }
+
+        function updateSelectAllResults() {
+            const size = state.results.size;
+            const allChecked = size > 0 && state.selectedResultIds.size === size;
+            document.getElementById('selectAllResults').checked = allChecked;
+        }
+
+        async function deleteSelectedResults() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            if (state.selectedResultIds.size === 0) { alert('请选择要删除的结果'); return; }
+            if (!confirm(`确定要删除选中的 ${state.selectedResultIds.size} 个检测结果吗？`)) return;
+
+            const ids = Array.from(state.selectedResultIds);
+            const response = await apiCall('/delete_results', 'POST', { server_ids: ids });
+
+            if (response.success) {
+                ids.forEach(id => {
+                    state.results.delete(id);
+                    state.selectedResultIds.delete(id);
+                });
+                renderResults();
+                updateStats();
+                alert(`成功删除 ${response.data.deleted} 个结果`);
+            } else {
+                alert('删除失败: ' + (response.error || '未知错误'));
+            }
+        }
+
+        async function rerunSelectedResults() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            if (state.selectedResultIds.size === 0) { alert('请选择要重新检测的服务器'); return; }
+
+            const ids = Array.from(state.selectedResultIds);
+            // 找出这些ID对应的服务器
+            const serverIds = ids.filter(id => state.servers.some(s => s.id === id));
+            if (serverIds.length === 0) { alert('选中的结果没有对应的服务器信息，请先解析服务器'); return; }
+
+            if (!confirm(`确定要重新检测选中的 ${serverIds.length} 台服务器吗？`)) return;
+
+            // 先删除旧结果
+            await apiCall('/delete_results', 'POST', { server_ids: ids });
+
+            // 调用重新检测API
+            const response = await apiCall('/rerun_detection', 'POST', { server_ids: serverIds });
+
+            if (response.success) {
+                alert(`重新检测已启动，共 ${response.data.detected} 台服务器`);
+                startDetectionPolling(serverIds);
+            } else {
+                alert('重新检测失败: ' + (response.error || '未知错误'));
+            }
+        }
+
+        let detectionPollTimer = null;
+        function startDetectionPolling(serverIds) {
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = '';
+            document.getElementById('stopBtn').style.display = '';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+            detectionPollTimer = setInterval(async () => {
+                const resp = await apiCall('/get_progress', 'POST');
+                if (resp.success && resp.data) {
+                    const p = resp.data;
+                    const percent = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
+                    document.getElementById('progressFill').style.width = percent + '%';
+                    document.getElementById('progressPercent').textContent = percent + '%';
+                    document.getElementById('progressText').textContent = `${p.completed}/${p.total}`;
+                    document.getElementById('currentServer').textContent = p.current_server || '-';
+                    document.getElementById('currentItem').textContent = p.current_item || '-';
+                    if (!p.is_running) {
+                        clearInterval(detectionPollTimer);
+                        detectionPollTimer = null;
+                        resetControlBtns();
+                        fetchResults();
+                    }
+                }
+            }, 1000);
+        }
+
+        async function exportReport() {
+            if (!isConnected) { alert('请先连接后端服务'); return; }
+            if (state.selectedResultIds.size === 0) { alert('请选择要导出的结果'); return; }
+
+            const format = document.getElementById('exportFormat').value;
+            const selectedIds = Array.from(state.selectedResultIds);
+            const response = await apiCall('/export_report', 'POST', { format, selected_ids: selectedIds });
+
+            if (response.success && response.data) {
+                const mimeType = format === 'json' ? 'application/json' : (format === 'txt' ? 'text/plain' : 'text/html');
+                const blob = new Blob([response.data.content], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backdoor_report.${format}`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } else {
+                alert('导出失败: ' + (response.error || '未知错误'));
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDetectionCommands();
+        });
+    </script>
+</body>
+</html>
